@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sketch to Color with Trace Feature</title>
+    <style>
+        body {
+            font-family: 'Poppins', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #000000, #3b4197);
+            color: #fff;
+        }
+
+        h1 {
+            margin-top: 20px;
+            font-size: 3rem;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+        }
+
+        .canvas-output-container {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        canvas {
+            border: 3px solid #fff;
+            box-shadow: 0px 10px 15px rgba(0, 0, 0, 0.2);
+            cursor: crosshair;
+            background-color: #fff;
+            border-radius: 10px;
+            transition: transform 0.2s ease-in-out;
+        }
+
+        canvas:hover {
+            transform: scale(1.05);
+        }
+
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .controls > * {
+            padding: 10px 15px;
+            font-size: 1rem;
+            background: linear-gradient(135deg, #84fab0, #8fd3f4);
+            border: none;
+            border-radius: 5px;
+            color: #333;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .controls > *:hover {
+            transform: translateY(-3px);
+            box-shadow: 0px 5px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .color-picker {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .color-picker label {
+            font-size: 1.2rem;
+        }
+
+        input[type="color"] {
+            cursor: pointer;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 5px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        input[type="range"] {
+            appearance: none;
+            height: 5px;
+            background: #fff;
+            border-radius: 5px;
+            outline: none;
+            transition: background 0.3s ease;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: #8fd3f4;
+            cursor: pointer;
+            box-shadow: 0px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        #coloredImage {
+            margin-top: 20px;
+            width: 400px;
+            height: 300px;
+            border: 2px solid #fff;
+            border-radius: 10px;
+            box-shadow: 0px 10px 15px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease-in-out;
+        }
+
+        #coloredImage:hover {
+            transform: scale(1.1);
+        }
+
+        button:disabled {
+            background-color: #d3d3d3;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎨 Sketch to Color ✨</h1>
+    <div class="canvas-output-container">
+        <canvas id="sketchCanvas" width="600" height="400"></canvas>
+        <img id="coloredImage" alt="Colored Output" />
+    </div>
+    <div class="controls">
+        <div class="color-picker">
+            <label for="color">Brush Color:</label>
+            <input type="color" id="color" value="#000000">
+        </div>
+        <div>
+            <label for="brushSize">Brush Size:</label>
+            <input type="range" id="brushSize" min="1" max="20" value="2">
+        </div>
+        <button onclick="undo()" id="undoButton">Undo</button>
+        <button onclick="clearCanvas()">Clear</button>
+        <button onclick="downloadColoredImage()">Download</button>
+        <div>
+            <label for="traceImage">Upload Image to Trace:</label>
+            <input type="file" id="traceImage" accept="image/*">
+        </div>
+    </div>
+
+    <script>
+        // Visible Canvas: For displaying trace image and user drawing
+        const canvas = document.getElementById('sketchCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Off-Screen Canvas: For storing only user drawing
+        const offScreenCanvas = document.createElement('canvas');
+        const offScreenCtx = offScreenCanvas.getContext('2d');
+        offScreenCanvas.width = canvas.width;
+        offScreenCanvas.height = canvas.height;
+
+        const coloredImage = document.getElementById('coloredImage');
+        const colorPicker = document.getElementById('color');
+        const brushSize = document.getElementById('brushSize');
+        const undoButton = document.getElementById('undoButton');
+        const traceImageInput = document.getElementById('traceImage');
+
+        let drawing = false;
+        let brushColor = colorPicker.value;
+        let brushWidth = brushSize.value;
+
+        const canvasHistory = [];
+        const offScreenHistory = [];
+        let undoLimit = 10;
+        let traceImage = null;
+
+        // Interval ID for sending sketches
+        let sendInterval = null;
+
+        colorPicker.addEventListener('change', (e) => brushColor = e.target.value);
+        brushSize.addEventListener('input', (e) => brushWidth = e.target.value);
+
+        traceImageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        traceImage = img;
+                        drawTraceImage();
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function drawTraceImage() {
+            if (traceImage) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear canvas
+                ctx.globalAlpha = 0.3; // Set transparency for tracing
+                ctx.drawImage(traceImage, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 1.0; // Reset transparency
+
+                // Redraw user drawing from off-screen canvas
+                ctx.drawImage(offScreenCanvas, 0, 0);
+            }
+        }
+
+        function saveState() {
+            if (canvasHistory.length >= undoLimit) canvasHistory.shift();
+            if (offScreenHistory.length >= undoLimit) offScreenHistory.shift();
+
+            // Save visible canvas state
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            tempCtx.drawImage(canvas, 0, 0);
+            canvasHistory.push(tempCanvas.toDataURL());
+
+            // Save off-screen canvas state
+            const tempOffScreenCanvas = document.createElement('canvas');
+            const tempOffScreenCtx = tempOffScreenCanvas.getContext('2d');
+            tempOffScreenCanvas.width = offScreenCanvas.width;
+            tempOffScreenCanvas.height = offScreenCanvas.height;
+            tempOffScreenCtx.drawImage(offScreenCanvas, 0, 0);
+            offScreenHistory.push(tempOffScreenCanvas.toDataURL());
+
+            updateUndoButton();
+        }
+
+        function updateUndoButton() {
+            undoButton.disabled = canvasHistory.length === 0;
+        }
+
+        canvas.addEventListener('mousedown', () => {
+            drawing = true;
+            saveState();
+
+            // Start sending sketches at 100ms intervals
+            if (!sendInterval) {
+                sendInterval = setInterval(sendSketch, 100);
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            drawing = false;
+            ctx.beginPath();
+            offScreenCtx.beginPath();
+
+            // Stop the interval when drawing ends
+            if (sendInterval) {
+                clearInterval(sendInterval);
+                sendInterval = null;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (event) => {
+            if (!drawing) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const x = (event.clientX - rect.left) * scaleX;
+            const y = (event.clientY - rect.top) * scaleY;
+
+            ctx.lineWidth = brushWidth;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = brushColor;
+
+            // Draw on visible canvas
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+
+            // Draw on off-screen canvas
+            offScreenCtx.lineWidth = brushWidth;
+            offScreenCtx.lineCap = 'round';
+            offScreenCtx.strokeStyle = brushColor;
+
+            offScreenCtx.lineTo(x, y);
+            offScreenCtx.stroke();
+            offScreenCtx.beginPath();
+            offScreenCtx.moveTo(x, y);
+        });
+
+        function undo() {
+            if (canvasHistory.length > 0 && offScreenHistory.length > 0) {
+                const previousState = canvasHistory.pop();
+                const previousOffScreenState = offScreenHistory.pop();
+
+                // Restore visible canvas
+                const img = new Image();
+                img.src = previousState;
+                img.onload = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+
+                    // Restore off-screen canvas
+                    const offImg = new Image();
+                    offImg.src = previousOffScreenState;
+                    offImg.onload = () => {
+                        offScreenCtx.clearRect(0, 0, offScreenCanvas.width, offScreenCanvas.height);
+                        offScreenCtx.drawImage(offImg, 0, 0);
+                        drawTraceImage();
+                    };
+                };
+                updateUndoButton();
+            } else {
+                alert('Nothing to undo!');
+            }
+        }
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            offScreenCtx.clearRect(0, 0, offScreenCanvas.width, offScreenCanvas.height);
+            ctx.beginPath();
+            offScreenCtx.beginPath();
+            coloredImage.src = '';
+            traceImage = null; // Clear the trace image
+            canvasHistory.length = 0;
+            offScreenHistory.length = 0;
+            updateUndoButton();
+        }
+
+        async function sendSketch() {
+            const dataURL = offScreenCanvas.toDataURL('image/png'); // Use off-screen canvas
+            try {
+                const response = await fetch('http://127.0.0.1:5000/process_sketch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: dataURL }),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    coloredImage.src = `data:image/png;base64,${data.coloredImage}`;
+                } else {
+                    console.error('Error in response:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Error sending sketch:', error);
+            }
+        }
+
+        function downloadColoredImage() {
+            const link = document.createElement('a');
+            link.download = 'colored_image.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        updateUndoButton(); // Initial button state
+    </script>
+</body>
+</html>
