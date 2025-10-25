@@ -10,21 +10,32 @@ import os
 app = Flask(__name__)
 c = 0
 
-# Load the GAN generator model
-model = tf.keras.models.load_model('Models/generator5.h5')
+# NOTE: The model path 'Models/generator5.h5' must be correct and the file must be present
+# in your Hugging Face Space repository.
+try:
+    # Set logging level to suppress detailed warnings during load
+    tf.get_logger().setLevel('ERROR') 
+    model = tf.keras.models.load_model('Models/generator5.h5')
+    print("Model loaded successfully.")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    # Create a placeholder function if model fails to load to prevent startup crash
+    def placeholder_predict(sketch):
+        print("Using placeholder prediction (Model failed to load).")
+        # Return a simple grayscale image array to match expected output shape
+        return np.zeros((1, 256, 256, 3), dtype=np.float32) 
+    model = type('DummyModel', (object,), {'predict': placeholder_predict})()
+
 
 def preprocess_image(image_data):
     """
     Convert base64 image to a NumPy array and preprocess for the model.
     Adds batch and channel dimensions to the input.
-    Saves the received image and adds a white background if necessary.
     """
     # Decode base64 image
+    # Note: Splitting by comma handles the "data:image/png;base64," prefix
     image = Image.open(io.BytesIO(base64.b64decode(image_data.split(",")[1]))).convert("RGBA")
     
-    # Save the received image
-    save_image(image, prefix='received')
-
     # Add white background if image has transparency
     if image.mode == 'RGBA':
         bg = Image.new("RGBA", image.size, (255, 255, 255, 255))
@@ -33,23 +44,32 @@ def preprocess_image(image_data):
         image = image.convert("L")
     
     image = image.resize((256, 256))  # Resize to match the model input size
-    image_array = np.array(image) / 255.0  # Normalize to [0, 1]
+    # Check if image is truly grayscale (1 channel)
+    image_array = np.array(image)
+    if image_array.ndim == 3:
+        # If it somehow ended up RGB, convert it back to single channel L
+        image_array = image_array[..., 0] 
+        
+    image_array = image_array / 255.0  # Normalize to [0, 1]
     
     # Add batch and channel dimensions
-    image_array = image_array[np.newaxis, ..., np.newaxis]  # Shape: (1, 256, 256, 1)
+    # Shape: (1, 256, 256, 1) for grayscale input
+    image_array = image_array[np.newaxis, ..., np.newaxis] 
     return image_array
 
 def postprocess_image(model_output):
     """
-    Convert the model output to a base64-encoded image.
-    Saves the generated colored image.
+    Convert the model output (expected to be 3-channel, range [-1, 1]) to a base64-encoded PNG image.
     """
     # Model output is expected to be normalized in [-1, 1], so rescale it to [0, 255]
-    image = ((model_output[0] + 1) * 127.5).astype(np.uint8)  # Rescale [-1, 1] to [0, 255]
-    image = Image.fromarray(image)
+    # The output is expected to be (1, 256, 256, 3) for an RGB image.
+    image = ((model_output[0] + 1) * 127.5).astype(np.uint8)
     
-    # Save the generated image
-    save_image(image, prefix='generated')
+    # If the model output is not 3 channels, handle it (e.g., if it's 1-channel grayscale output)
+    if image.ndim == 2:
+        image = np.stack([image] * 3, axis=-1) # Stack to create RGB if it's grayscale
+
+    image = Image.fromarray(image)
     
     buffered = io.BytesIO()
     image.save(buffered, format="PNG")
@@ -57,28 +77,25 @@ def postprocess_image(model_output):
 
 def save_image(image, prefix='image'):
     """
-    Save the PIL Image to the 'saved_images' directory with a timestamp.
+    Placeholder for saving images. File system writing is disabled in this environment.
     """
-    if not os.path.exists('saved_images'):
-        os.makedirs('saved_images')
-    timestamp = int(tf.timestamp().numpy())
+    pass
 
 @app.route('/')
 def index():
+    # Looks for 'index.html' in the 'templates' directory
     return render_template('index.html')
 
 @app.route('/process_sketch', methods=['POST'])
 def process_sketch():
     global c
     c += 1
-    print(c)
-    """
-    Receive sketch image, add white background, save it, process it through the GAN, and return the colored image.
-    """
+    print(f"Request count: {c}")
+    
     try:
         # Parse the incoming request
         data = request.get_json()
-        image_data = data['image']
+        image_data = data['image'] # Expecting the base64 data URL string
 
         # Preprocess the sketch
         sketch = preprocess_image(image_data)
@@ -92,8 +109,12 @@ def process_sketch():
         # Return the result
         return jsonify({'coloredImage': colored_image_base64})
     except Exception as e:
-        print(f"Error processing sketch: {e}")
-        return jsonify({'error': str(e)}), 500
+        # Log the error and return a 500 status
+        error_message = f"Error processing sketch: {e}"
+        print(error_message)
+        return jsonify({'error': error_message}), 500
 
 if __name__ == '__main__':
-    app.run (debug=True)
+    # Mandatory for deployment: use the PORT environment variable
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
