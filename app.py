@@ -1,48 +1,3 @@
-Hugging Face's logo
-Hugging Face
-Models
-Datasets
-Spaces
-Community
-Docs
-Enterprise
-Pricing
-
-
-Hugging Face is way more fun with friends and colleagues! 🤗 Join an organization
-Spaces:
-UTK39
-/
-inkspire-sketch-colorizer
-
-
-like
-1
-
-Logs
-App
-Files
-Community
-Settings
-inkspire-sketch-colorizer
-/
-app.py
-
-UTK39's picture
-UTK39
-Update app.py
-8fc248c
-verified
-2 minutes ago
-raw
-
-Copy download link
-history
-blame
-edit
-delete
-
-3.31 kB
 from flask import Flask, request, jsonify, render_template
 import base64
 import io
@@ -149,4 +104,3 @@ if __name__ == '__main__':
     # Mandatory for deployment: use the PORT environment variable
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
