@@ -64,22 +64,21 @@ def preprocess_image(image_data):
     return image_array
 
 def postprocess_image(model_output):
-    """
-    Convert the model output (expected to be 3-channel, range [-1, 1]) to a base64-encoded PNG image.
-    """
-    # Model output is expected to be normalized in [-1, 1], so rescale it to [0, 255]
-    # The output is expected to be (1, 256, 256, 3) for an RGB image.
-    image = ((model_output[0] + 1) * 127.5).astype(np.uint8)
-    
-    # If the model output is not 3 channels, handle it (e.g., if it's 1-channel grayscale output)
-    if image.ndim == 2:
-        image = np.stack([image] * 3, axis=-1) # Stack to create RGB if it's grayscale
+    image = model_output[0]
+
+    # If model outputs in [0,1]
+    if image.max() <= 1.0:
+        image = (image * 255).astype(np.uint8)
+    else:
+        image = ((image + 1) * 127.5).astype(np.uint8)
+
+    if image.shape[-1] == 1:
+        image = np.repeat(image, 3, axis=-1)
 
     image = Image.fromarray(image)
-    
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
 def save_image(image, prefix='image'):
     """
